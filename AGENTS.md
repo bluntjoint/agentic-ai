@@ -4,20 +4,20 @@ All three scenarios share a common request lifecycle:
 
 ```mermaid
 flowchart TD
-  U[User] -->|Interact via Streamlit UI| FE[Frontend]
-  FE -->|POST /api/chat {scenario, message}| BE[Backend]
+  U[User] -->|"Interact via Streamlit UI"| FE[Frontend]
+  FE -->|"POST /api/chat"| BE[Backend]
   subgraph Router
     BE --> SR[Scenario Router]
   end
   SR -->|"incident"| IRA[IncidentRecallAgent]
   SR -->|"pdf_qa"| PQ[PDFQAAgent]
   SR -->|"image_verify"| IVA[ImageVerificationAgent]
-  IRA -->|returns messages| SR
-  PQ  -->|returns messages| SR
-  IVA -->|returns messages| SR
-  SR -->|JSON {messages}| BE
-  BE -->|HTTP response| FE
-  FE -->|Render text/images| U
+  IRA -->|"returns messages"| SR
+  PQ  -->|"returns messages"| SR
+  IVA -->|"returns messages"| SR
+  SR -->|"JSON messages"| BE
+  BE -->|"HTTP response"| FE
+  FE -->|"Render text/images"| U
 ```
 
 ---
@@ -28,17 +28,17 @@ Handles Excel uploads and keyword searches over incident records.
 
 ```mermaid
 flowchart LR
-  subgraph Load & Store
+  subgraph Load_Store["Load & Store"]
     A["Backend: upload_incidents()"] --> B["IncidentRecallAgent.load_incidents(path)"]
     B --> C["pandas.read_excel → DataFrame"]
     C --> D["self.incidents = list of dicts"]
   end
 
-  subgraph Query & Response
-    E["Frontend: POST /api/chat\npayload: 'file_id::query'"] --> F["IncidentRecallAgent.handle(payload)"]
+  subgraph Query_Response["Query & Response"]
+    E["Frontend: POST /api/chat<br/>payload: 'file_id::query'"] --> F["IncidentRecallAgent.handle(payload)"]
     F --> G["Split payload → file_id, query"]
     G --> H["Filter self.incidents for substring match"]
-    H --> I["Build list of {'sender':'bot','text':…}"]
+    H --> I["Build list of messages"]
     I --> J["Return messages"]
   end
 ```
@@ -64,21 +64,21 @@ Processes large PDFs into embeddings and answers questions via a QA chain.
 flowchart LR
   subgraph Ingestion
     A1["Backend: upload_pdf()"] --> B1["PDFQAAgent.load_document(doc_id,path)"]
-    B1 --> C1["extract_text(path)\n(PyMuPDF)"]
-    C1 --> D1["CharacterTextSplitter\n(chunk_size=1000, overlap=100)"]
+    B1 --> C1["extract_text(path)<br/>(PyMuPDF)"]
+    C1 --> D1["CharacterTextSplitter<br/>(chunk_size=1000, overlap=100)"]
     D1 --> E1["List of text chunks"]
     E1 --> F1["OpenAIEmbeddings → vectors"]
     F1 --> G1["FAISS.from_texts(chunks, embeddings)"]
     G1 --> H1["self.vectors[doc_id] = FAISS index"]
   end
 
-  subgraph Question & Answer
-    I1["Frontend: POST /api/chat\npayload: 'file_id::question'"] --> J1["PDFQAAgent.handle(payload)"]
+  subgraph Question_Answer["Question & Answer"]
+    I1["Frontend: POST /api/chat<br/>payload: 'file_id::question'"] --> J1["PDFQAAgent.handle(payload)"]
     J1 --> K1["vectorstore = self.vectors[file_id]"]
     K1 --> L1["vectorstore.similarity_search(question) → docs"]
     L1 --> M1["load_qa_chain(OpenAI(), 'stuff')"]
     M1 --> N1["chain.run(input_documents=docs, question) → answer"]
-    N1 --> O1["Return [{'sender':'bot','text': answer}]"]
+    N1 --> O1["Return messages with answer"]
   end
 ```
 
@@ -95,17 +95,17 @@ Extracts images from PDFs and generates simple heatmaps highlighting tampering c
 flowchart LR
   subgraph Ingestion
     A2["Backend: upload_pdf()"] --> B2["ImageVerificationAgent.load_document(doc_id,path)"]
-    B2 --> C2["extract_images(path)\n(PyMuPDF)"]
+    B2 --> C2["extract_images(path)<br/>(PyMuPDF)"]
     C2 --> D2["List of PIL Images"]
-    D2 --> E2["create_heatmap(image)\n(normalize grayscale)"]
+    D2 --> E2["create_heatmap(image)<br/>(normalize grayscale)"]
     E2 --> F2["self.heatmaps[doc_id] = [heatmap images]"]
   end
 
-  subgraph Validation & Response
-    G2["Frontend: POST /api/chat\npayload: 'file_id'"] --> H2["ImageVerificationAgent.handle(file_id)"]
+  subgraph Validation_Response["Validation & Response"]
+    G2["Frontend: POST /api/chat<br/>payload: 'file_id'"] --> H2["ImageVerificationAgent.handle(file_id)"]
     H2 --> I2["Retrieve heatmaps list"]
-    I2 --> J2["For each image:\n• Save to buffer\n• base64 encode"]
-    J2 --> K2["Return [{'sender':'bot','heatmap': b64}, …]"]
+    I2 --> J2["For each image:<br/>• Save to buffer<br/>• base64 encode"]
+    J2 --> K2["Return messages with heatmaps"]
   end
 ```
 
@@ -122,5 +122,5 @@ flowchart LR
 | **OpenAIEmbeddings**      | Convert text chunks into high-dimensional vectors |
 | **CharacterTextSplitter** | Break large text into overlapping chunks          |
 | **FAISS**                 | In-memory vector store for similarity search      |
-| **load\_qa\_chain**       | Orchestrates retrieval + generation for PDF Q\&A  |
+| **load\_qa\_chain**       | Orchestrates retrieval + generation for PDF Q&A  |
 | **OpenAI (LLM wrapper)**  | Actual model calls to generate text responses     |
