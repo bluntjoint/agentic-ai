@@ -1,35 +1,28 @@
 # 🤖 Agent Interaction Flow (LangChain)
 
-This standalone document explains how each LangChain-based agent ingests inputs, processes data, and produces responses. Use this as an in-depth reference for developer or stakeholder understanding.
+This document details the step-by-step interaction flow for each LangChain-based agent, illustrating how inputs are consumed, processed, and transformed into structured outputs.
 
 ---
 
 ## 1. Common Lifecycle
 
-1. **Initialization**
+```mermaid
+flowchart TB
+  subgraph Lifecycle
+    Init[Initialization] --> Upload[File Upload]
+    Upload --> Load[Data Loading]
+    Load --> Store[In-Memory Storage]
+    Store --> Query[Handle Query]
+    Query --> Respond[Response Construction]
+  end
+```
 
-   * Instantiate agent class in `backend/app.py`:
-
-     ```python
-     incident_agent = IncidentRecallAgent()
-     pdf_agent = PDFQAAgent()
-     img_agent = ImageVerificationAgent()
-     ```
-2. **Data Loading**
-
-   * Files are uploaded via `/api/upload` endpoints and saved to disk.
-   * Each agent’s `load_...` method is invoked with `(file_id, path)`.
-3. **In-Memory Storage**
-
-   * Agents store preprocessed data (DataFrame, embeddings, images) in dictionaries keyed by `file_id`.
-4. **Handling Queries**
-
-   * On `POST /api/chat`, backend routes to `agent.handle(message)`.
-   * `message` payload may include `file_id` and query text separated by `::`.
-5. **Response Construction**
-
-   * Agents return a list of structured messages (text or Base64 images).
-   * Backend returns JSON `{ messages: [...] }` to frontend.
+1. **Initialization**: Instantiate agents in `backend/app.py`.
+2. **File Upload**: Frontend sends file via `/api/upload`.
+3. **Data Loading**: Agents parse and preprocess data.
+4. **Storage**: Preprocessed data stored in dictionaries keyed by `file_id`.
+5. **Handling Query**: Frontend sends `{scenario, message}` to `/api/chat`.
+6. **Response Construction**: Agents return JSON messages or Base64 images.
 
 ---
 
@@ -38,26 +31,22 @@ This standalone document explains how each LangChain-based agent ingests inputs,
 ```mermaid
 flowchart LR
   subgraph IncidentRecallAgent
-    A[load_incidents(path)] --> B[pandas.read_excel]
-    B --> C[store DataFrame in self.incidents]
-    D[handle("file_id::keyword")] --> E[filter self.incidents by substring]
-    E --> F[construct JSON messages]
+    A[[load_incidents(path)]] --> B[[pandas.read_excel(path)]]
+    B --> C[[convert to list of dicts in self.incidents]]
+    D[[handle("file_id::keyword")]] --> E[[filter records by substring match]]
+    E --> F[[format results into JSON messages]]
   end
 ```
 
 1. **load\_incidents(path)**
 
-   * Read Excel into `pandas.DataFrame`
-   * Convert to list of dicts: `self.incidents`
+   * Reads the Excel file into a `pandas.DataFrame`.
+   * Converts DataFrame rows to Python dictionaries stored in `self.incidents`.
 2. **handle(payload)**
 
-   * Parse `file_id` (not used) and `query` text
-   * Substring-match across incident records
-   * Build response messages:
-
-     ```json
-     [{"sender": "bot", "text": "Found X incidents:"}, ...]
-     ```
+   * Splits `payload` into `file_id` and `query`.
+   * Searches `self.incidents` for matches.
+   * Builds a list of JSON-formatted messages for each matching record.
 
 ---
 
@@ -66,33 +55,27 @@ flowchart LR
 ```mermaid
 flowchart TD
   subgraph PDFQAAgent
-    A[load_document(id, path)] --> B[extract_text(path)]
-    B --> C[split_text(chunks)]
-    C --> D[OpenAIEmbeddings.embed(chunks)]
-    D --> E[FAISS.from_texts(chunks, embeddings)]
-    E --> F[store vectorstore in self.vectors[id]]
-    
-    G[handle("id::question")] --> H[vectorstore.similarity_search(question)]
-    H --> I[load_qa_chain(OpenAI)]
-    I --> J[chain.run(docs, question)]
-    J --> K[return [{sender, text: answer}]]
+    A[[load_document(doc_id, path)]] --> B[[extract_text(path) via PyMuPDF]]
+    B --> C[[split_text into chunks (1k/100 overlap)]]
+    C --> D[[compute embeddings with OpenAIEmbeddings]]
+    D --> E[[index chunks in FAISS vectorstore]]
+
+    F[[handle("doc_id::question")]] --> G[[similarity_search(question)]]
+    G --> H[[load_qa_chain(OpenAI)]]
+    H --> I[[chain.run(input_documents, question)]]
+    I --> J[[return answer in JSON message]]
   end
 ```
 
 1. **load\_document(doc\_id, path)**
 
-   * Extract full text from PDF with PyMuPDF
-   * Split into overlapping chunks via `CharacterTextSplitter`
-   * Compute embeddings using `OpenAIEmbeddings`
-   * Create FAISS vector store and save to `self.vectors[doc_id]`
+   * Extracts raw text and splits into overlapping chunks.
+   * Embeds chunks and indexes them with FAISS.
 2. **handle(payload)**
 
-   * Split into `file_id` and `question`
-   * Retrieve vectorstore by `file_id`
-   * Perform `similarity_search(question)` → returns top document chunks
-   * Initialize QA chain: `load_qa_chain(OpenAI(), chain_type="stuff")`
-   * Run chain: `chain.run(input_documents=docs, question=question)`
-   * Return answer wrapped in message format
+   * Retrieves vectorstore by `doc_id`.
+   * Runs a similarity search to fetch relevant chunks.
+   * Executes the QA chain to produce a context-aware answer.
 
 ---
 
@@ -101,36 +84,35 @@ flowchart TD
 ```mermaid
 flowchart LR
   subgraph ImageVerificationAgent
-    A[load_document(id, path)] --> B[extract_images(path)]
-    B --> C[for each image: create_heatmap(img)]
-    C --> D[store heatmaps in self.heatmaps[id]]
-    
-    E[handle(file_id)] --> F[iterate heatmaps]
-    F --> G[encode to Base64]
-    G --> H[return [{sender, heatmap: b64}]]
+    A[[load_document(doc_id, path)]] --> B[[extract_images via PyMuPDF]]
+    B --> C[[create_heatmaps with Pillow + NumPy]]
+    C --> D[[store heatmaps in self.heatmaps[doc_id]]]  
+
+    E[[handle("file_id")]] --> F[[retrieve stored heatmaps]]
+    F --> G[[encode each heatmap PNG to Base64]]
+    G --> H[[return Base64 images in JSON messages]]
   end
 ```
 
 1. **load\_document(doc\_id, path)**
 
-   * Use PyMuPDF to extract embedded images
-   * For each image, generate grayscale heatmap with NumPy + Pillow
-   * Store list of heatmaps in `self.heatmaps[doc_id]`
+   * Extracts images from PDF and generates grayscale heatmaps.
+   * Stores the list of heatmap images keyed by `doc_id`.
 2. **handle(file\_id)**
 
-   * Retrieve heatmaps array
-   * Encode each heatmap PNG to Base64 string
-   * Return list of messages containing `heatmap` field
+   * Fetches precomputed heatmaps for `file_id`.
+   * Encodes each heatmap as a Base64 string and includes them in JSON responses.
 
 ---
 
 ## 5. Key LangChain Components
 
-| Component                 | Description                                                              |
-| ------------------------- | ------------------------------------------------------------------------ |
-| **CharacterTextSplitter** | Breaks long text into fixed-size chunks with overlap to maintain context |
-| **OpenAIEmbeddings**      | Converts text chunks to dense vector representations                     |
-| **FAISS**                 | In-memory vector store for similarity search                             |
-| **load\_qa\_chain**       | Builds a question-answering pipeline over retrieved documents            |
-| **chain.run(...)**        | Executes LLM-based retrieval-augmented generation                        |
+| Component                 | Description                                                      |
+| ------------------------- | ---------------------------------------------------------------- |
+| **CharacterTextSplitter** | Splits long text into overlapping chunks to preserve context     |
+| **OpenAIEmbeddings**      | Converts text chunks into high-dimensional vector embeddings     |
+| **FAISS**                 | In-memory vector index enabling efficient similarity searches    |
+| **load\_qa\_chain**       | Constructs a retrieval-augmented QA pipeline over retrieved docs |
+| **chain.run(...)**        | Executes the LLM chain to generate answers                       |
+
 
