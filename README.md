@@ -1,5 +1,3 @@
-# 📦 README.md
-
 Welcome to the **Agentic System Chatbot**, a modular, AI-driven platform that helps teams:
 
 * 🚀 **Incident Recall**: Instantly retrieve past incident resolutions.
